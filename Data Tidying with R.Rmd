@@ -1,0 +1,64 @@
+---
+title: "Data Tidying and Filtering"
+author: "Edwin Rivas Meraz"
+date: "5/31/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load required packages
+```{r}
+
+load.packages <- function(x){if(class(x) != 'character') 
+  stop("Error: packages listed in vector are not characters!") #includes a sanity check 
+  lapply(x, require, character.only = TRUE)
+}
+
+packs <- c('readxl', 'tidyverse', 'dplyr', 'kableExtra')
+load.packages(packs)
+```
+
+
+## Reading in the data
+```{r}
+Master <- read_csv(file = "DOEMSIPP_Incubations_Data.csv")
+```
+
+## Table it
+```{r}
+
+kable(Master) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", 'condensed'))
+
+```
+
+### How are the variables organized? What does each row represent? Each column?
+
+## Filter Filter Filter
+```{r}
+ORP <- Master %>% filter(projectcode == 'DOE2', analyte == 'ORP')
+
+#designate the columns that should have numeric values
+cols.num <- names(ORP[,8])
+  
+#converts all desingated columns to numeric
+ORP[cols.num] <- lapply(ORP[cols.num],as.numeric)
+
+#Take the mean of rows grouped by incubation day and treament (i.e. Mn 3d)
+ORP.mean <- ORP %>%
+  group_by(incubationdays, treatment) %>%
+  summarise_at(vars(measvalue), funs(mean(., na.rm=TRUE))) # remove na values
+
+
+ORP.mean %>% ggplot(aes(x = incubationdays, y = measvalue, color = treatment)) + geom_point() + facet_wrap(~treatment) + geom_path() + ggtitle('ORP') + theme_classic()
+
+```
+
+### What does each component of the ggplot do?
+
+### How would you improve this figure?
+
+### Choose another analyte and make a similar figure. If you think another type of figure would better display this data let me know and I can help you build it.
