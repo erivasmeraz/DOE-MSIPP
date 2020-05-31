@@ -1,0 +1,339 @@
+---
+title: "Combinatorial Tidying"
+author: "Edwin Rivas Meraz"
+date: "5/4/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r , warning=FALSE, message=FALSE}
+load.packages <- function(x){if(class(x) != 'character') 
+  stop("Error: packages listed in vector are not characters!") #includes a sanity check 
+  lapply(x, require, character.only = TRUE)
+}
+
+packs <- c('readxl', 'reshape2', 'gridExtra', 'ggpubr', 'tidyverse', 'dplyr', 'LCF', 'kableExtra', 'patchwork')
+load.packages(packs)
+
+```
+
+## XAS Data Wrangling
+
+```{r, warning=FALSE, message=FALSE}
+XAS.Wrangle <- function(path){
+  
+  #read in xls files and combine into tbl
+  filepaths <- list.files(path = path, pattern = "*.xls", full.names = T)
+  filenames <- list.files(path = path, pattern = '.xls')
+  filelist <- lapply(filepaths, read_xls) 
+  names(filelist) <- str_replace(filenames, ".xls", "")
+  
+  #adds an id dictated by names of tibbles when unnesting 
+  for (i in 1:length(filelist)) {
+  filelist[[i]]$sample <- names(filelist[i])
+  }
+  
+  #changes names of first 5 columns (always present)
+  oldnames <- c('...1', '...2', '...3', '...4', '...5')
+  newnames <- c('R_Factor', 'Reduced_chi_sq', 'Chi_sq', 'n_references', 'Sum')
+  filelist <- filelist %>% bind_rows() %>% rename_at(vars(oldnames), ~ newnames)
+  
+  
+  if(names(filelist[,1:5]) != c('R_Factor', 'Reduced_chi_sq', 'Chi_sq', 'n_references', 'Sum'))
+  stop("Original first 5 column names have been changed!")
+
+  
+  
+  #move sample column to last column position
+  filelist <- filelist[,c(colnames(filelist)[colnames(filelist)!='sample'],'sample')]
+  
+  
+  #designate the columns that should have numeric values
+  cols.num <- names(filelist[,1:length(filelist)-1])
+  
+  #converts all desingated columns to numeric
+  filelist[cols.num] <- lapply(filelist[cols.num],as.numeric)
+  
+  #round values numeric values (all but last column) to 3 decimal places
+  filelist[,-length(filelist)] <-round(filelist[,-length(filelist)],3) #the "-1" excludes column 1
+  
+  #removes column names from original xls files that were read as values
+  filelist <- filelist[!is.na(filelist$R_Factor),]
+  
+  
+  #delete columns associated with e0 and its error
+  Nth.delete<-function(dataframe, n)dataframe[,-(seq(n,to=ncol(dataframe),by=n))]
+  x <- filelist[,6:length(filelist)] %>% 
+    Nth.delete(n = 4) %>%
+    Nth.delete(n=3)
+  y <- filelist[,1:5]
+  z <- data.frame(y,x) %>% as_tibble()
+  
+  #Renames error columns
+  colnames(z) <- make.unique(gsub('^...\\d', 'error', colnames(z)))
+  
+  #adds id number to each combinatorial fit
+  z$id <- 1:nrow(z)
+
+  return(z)
+}
+```
+
+## Example 1
+```{r, warning=FALSE, message=FALSE}
+#reading in data
+XAS <- XAS.Wrangle(path = 'C:\\Users\\edwin\\OneDrive - University of California Merced\\SSRL Data\\Averages July 2019\\EXAFS\\EXAFS Plots')
+
+kable(XAS) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", 'condensed'))
+
+
+```
+
+
+## Example 2
+```{r, warning=FALSE, message=FALSE}
+
+XAS.XANES <- XAS.Wrangle(path = 'C:\\Users\\edwin\\OneDrive - University of California Merced\\SSRL Data\\Averages July 2019\\XANES')
+
+kable(XAS.XANES) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", 'condensed'))
+
+```
+
+
+
+# Example 3
+```{r, warning=FALSE, message=FALSE}
+
+XAS.EXAFS.2020 <- XAS.Wrangle(path = 'C:\\Users\\edwin\\OneDrive - University of California Merced\\SSRL Data\\Averages Feb 2020\\EXAFS\\EXAFS Plots')
+
+kable(XAS.EXAFS.2020) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", 'condensed'))
+
+```
+
+
+## Plots
+```{r , warning=FALSE, message=FALSE}
+#colors to be used for each variable
+colors <- c(`Sediment Mn`= "burlywood", `Aqueous Mn`="skyblue2", 
+            Birnessite="slategrey", `MnO2 Amend.` ="plum")
+
+
+#melts the dataframe grouped by id and samples 
+#filtered for Mn_3d and weights
+#EXAFS
+Mn3d <- melt(XAS, id.vars = c('id','sample')) %>% filter(sample == 'Mn_3d_EXAFS' & id == 16 & variable %in% c("MnSO4_soln.avg", "SEDC_GR_20190628_0d_1_010_6sc_fl.avg.smoothed.1.times", 'NaBirn_500_K15.avg', 'Mn_MnO2_Carulite_400_003_3sc_fl.avg')) %>% mutate(variable = str_replace(string = variable, pattern = "^.*$", replacement =  c('Aqueous Mn', 'Birnessite', 'MnO2 Amend.', "Sediment Mn"))) %>% select(-id) %>% drop_na()
+
+Mn3d.plot <- ggplot(Mn3d, aes(fill=variable, y=value, x=sample, order=variable)) + 
+    geom_bar(position="stack", stat="identity", aes(fill=variable)) + scale_fill_manual(values = colors) + ylab('Spectral Wt (%)') + theme_classic() + coord_cartesian(ylim = c(0, 1)) + theme(axis.title.x = element_blank()) + geom_text(aes(label = paste0(c(round(Mn3d$value, 2)*100),'%')), position = position_stack(vjust = 0.5))
+
+
+#filtered for Mn_10d and weights
+
+Mn10d <- melt(XAS, id.vars = c('id','sample')) %>% filter(sample == 'Mn_10d_EXAFS' & id == 1 & variable %in% c("MnSO4_soln.avg", "SEDC_GR_20190628_0d_1_010_6sc_fl.avg.smoothed.1.times", 'NaBirn_500_K15.avg', 'Mn_MnO2_Carulite_400_003_3sc_fl.avg')) %>% mutate(variable = str_replace(string = variable, pattern = "^.*$", replacement =  c('Aqueous Mn', 'Birnessite', 'MnO2 Amend.', "Sediment Mn"))) %>% select(-id) %>% drop_na()
+
+
+Mn10d.plot <- ggplot(Mn10d, aes(fill=variable, y=value, x=sample, order=variable)) + 
+    geom_bar(position="stack", stat="identity", aes(fill=variable)) + scale_fill_manual(values = colors) + ylab('Spectral Wt (%)')+theme_classic() + coord_cartesian(ylim = c(0, 1)) + theme(axis.title.x = element_blank()) + geom_text(aes(label = paste0(c(round(Mn10d$value, 2)*100),'%')), position = position_stack(vjust = 0.5))
+
+
+
+#filtered for Mn_20d and weights
+
+Mn20d <- melt(XAS, id.vars = c('id','sample')) %>% filter(sample == 'Mn_20d_EXAFS' & id == 5 & variable %in% c("MnSO4_soln.avg", "SEDC_GR_20190628_0d_1_010_6sc_fl.avg.smoothed.1.times", 'NaBirn_500_K15.avg', 'Mn_MnO2_Carulite_400_003_3sc_fl.avg'))  %>% mutate(variable = str_replace(string = variable, pattern = "^.*$", replacement =  c('Aqueous Mn', 'Birnessite', 'MnO2 Amend.', "Sediment Mn"))) %>% select(-id) %>% drop_na()
+
+
+Mn20d.plot <- ggplot(Mn20d, aes(fill=variable, y=value, x=sample, order=variable)) + 
+    geom_bar(position="stack", stat="identity", aes(fill=variable)) + scale_fill_manual(values = colors) + ylab('Spectral Wt (%)')+theme_classic() + coord_cartesian(ylim = c(0, 1)) + theme(axis.title.x = element_blank(), legend.position = 'bottom') + geom_text(aes(label = paste0(c(round(Mn20d$value, 2)*100),'%')), position = position_stack(vjust = 0.5))
+
+
+
+#filtered for MnAC_3d and weights
+MnAC3d <- melt(XAS, id.vars = c('id','sample')) %>% filter(sample == 'MnAC_3d_EXAFS' & id == 28 & variable %in% c("MnSO4_soln.avg", "SEDC_GR_20190628_0d_1_010_6sc_fl.avg.smoothed.1.times", 'NaBirn_500_K15.avg', 'Mn_MnO2_Carulite_400_003_3sc_fl.avg')) %>% mutate(variable = str_replace(string = variable, pattern = "^.*$", replacement =  c('Aqueous Mn', 'Birnessite', 'MnO2 Amend.', "Sediment Mn"))) %>% select(-id) %>% drop_na()
+
+
+MnAC3d.plot <- ggplot(MnAC3d, aes(fill=variable, y=value, x=sample)) + 
+    geom_bar(position="stack", stat="identity", aes(fill=variable)) + scale_fill_manual(values = colors) + ylab('Spectral Wt (%)')+theme_classic() + coord_cartesian(ylim = c(0, 1)) + theme(axis.title.x = element_blank(), legend.position = 'bottom') + geom_text(aes(label = paste0(c(round(MnAC3d$value, 2)*100),'%')), position = position_stack(vjust = 0.5))
+
+
+#filtered for MnAC_10d and weights
+MnAC10d <- melt(XAS, id.vars = c('id','sample')) %>% filter(sample == 'MnAC_10d_EXAFS' & id == 20 & variable %in% c("MnSO4_soln.avg", "SEDC_GR_20190628_0d_1_010_6sc_fl.avg.smoothed.1.times", 'NaBirn_500_K15.avg', 'Mn_MnO2_Carulite_400_003_3sc_fl.avg')) %>% mutate(variable = str_replace(string = variable, pattern = "^.*$", replacement =  c('Aqueous Mn', 'Birnessite', 'MnO2 Amend.', "Sediment Mn"))) %>% select(-id) %>% drop_na()
+
+
+MnAC10d.plot <- ggplot(MnAC10d, aes(fill=variable, y=value, x=sample)) + 
+    geom_bar(position="stack", stat="identity", aes(fill=variable)) + scale_fill_manual(values = colors) + ylab('Spectral Wt (%)')+theme_classic() + coord_cartesian(ylim = c(0, 1)) + theme(axis.title.x = element_blank()) + geom_text(aes(label = paste0(c(round(MnAC10d$value, 2)*100),'%')), position = position_stack(vjust = 0.5))
+
+
+#filtered for MnAC_20d and weights
+MnAC20d <- melt(XAS, id.vars = c('id','sample')) %>% filter(sample == 'MnAC_20d_EXAFS' & id == 24 & variable %in% c("MnSO4_soln.avg", "SEDC_GR_20190628_0d_1_010_6sc_fl.avg.smoothed.1.times", 'NaBirn_500_K15.avg', 'Mn_MnO2_Carulite_400_003_3sc_fl.avg')) %>% mutate(variable = str_replace(string = variable, pattern = "^.*$", replacement =  c('Aqueous Mn', 'Birnessite', 'MnO2 Amend.', "Sediment Mn"))) %>% select(-id) %>% drop_na()
+
+
+MnAC20d.plot <- ggplot(MnAC20d, aes(fill=variable, y=value, x=sample)) + 
+    geom_bar(position="stack", stat="identity", aes(fill=variable)) + scale_fill_manual(values = colors) + ylab('Spectral Wt (%)')+theme_classic() + coord_cartesian(ylim = c(0, 1)) + theme(axis.title.x = element_blank()) + geom_text(aes(label = paste0(c(round(MnAC20d$value, 2)*100),'%')), position = position_stack(vjust = 0.5))
+
+```
+
+
+```{r , warning=FALSE, message=FALSE}
+#Relative Component Percentages from Linear Combination Fits of EXAFS from XAS data
+leg.EXAFS <- get_legend(Mn20d.plot)
+
+EXAFS.Mn.plots <- ggarrange(Mn3d.plot, Mn10d.plot, Mn20d.plot, legend.grob = leg.EXAFS, nrow = 1, ncol = 3, legend = 'bottom')
+
+EXAFS.MnAC.plots <- ggarrange(MnAC3d.plot, MnAC10d.plot, MnAC20d.plot, legend.grob = leg.EXAFS, nrow = 1, ncol = 3, legend = 'bottom')
+
+EXAFS.Mn <- annotate_figure(p = EXAFS.Mn.plots, top = 'Mn EXAFS Spectral Weights' )
+
+EXAFS.MnAC <- annotate_figure(p = EXAFS.MnAC.plots, top = 'MnAC EXAFS Spectral Weights' )
+
+```
+
+
+```{r , warning=FALSE, message=FALSE}
+#XANES Mn Spectral Weight tables
+Mn3d.XANES <- melt(XAS.XANES, id.vars = c('id','sample')) %>% filter(sample == 'Mn_3days_XANES' & id == 16 & variable %in% c("MnSO4_soln.avg", 'NaBirn_500_K15.avg', 'Mn_MnO2_Carulite_400_003_3sc_fl.avg', 'SEDC_GR_20190628_0d_1_010_6sc_fl.avg')) %>% 
+  mutate(variable = str_replace(string = variable, pattern = "^.*$", replacement =  c('Aqueous Mn', 'Birnessite', 'MnO2 Amend.', 'Sediment Mn'))) %>%
+  mutate(sample = str_replace(string = sample, pattern = "^.*$", replacement =  c('Mn_3d'))) %>% select(-id) %>% drop_na()
+
+
+Mn10d.XANES <- melt(XAS.XANES, id.vars = c('id','sample')) %>% filter(sample == 'Mn_10days_XANES' & id == 1 & variable %in% c("MnSO4_soln.avg", 'NaBirn_500_K15.avg', 'Mn_MnO2_Carulite_400_003_3sc_fl.avg', 'SEDC_GR_20190628_0d_1_010_6sc_fl.avg')) %>% 
+  mutate(variable = str_replace(string = variable, pattern = "^.*$", replacement =  c('Aqueous Mn', 'Birnessite', 'MnO2 Amend.', 'Sediment Mn'))) %>%
+  mutate(sample = str_replace(string = sample, pattern = "^.*$", replacement =  c('Mn_10d'))) %>% select(-id) %>% drop_na()
+
+
+Mn20d.XANES <- melt(XAS.XANES, id.vars = c('id','sample')) %>% filter(sample == 'Mn_20days_XANES' & id == 5 & variable %in% c("MnSO4_soln.avg", 'NaBirn_500_K15.avg', 'Mn_MnO2_Carulite_400_003_3sc_fl.avg', 'SEDC_GR_20190628_0d_1_010_6sc_fl.avg')) %>% 
+  mutate(variable = str_replace(string = variable, pattern = "^.*$", replacement =  c('Aqueous Mn', 'Birnessite', 'MnO2 Amend.', 'Sediment Mn'))) %>%
+  mutate(sample = str_replace(string = sample, pattern = "^.*$", replacement =  c('Mn_20d'))) %>% select(-id) %>% drop_na()
+```
+
+
+```{r , warning=FALSE, message=FALSE}
+#XANES MnAC Spectral Weight tables
+MnAC3d.XANES <- melt(XAS.XANES, id.vars = c('id','sample')) %>% filter(sample == 'MnAC_3days_XANES' & id == 35 & variable %in% c("MnSO4_soln.avg", 'NaBirn_500_K15.avg', 'Mn_MnO2_Carulite_400_003_3sc_fl.avg', 'SEDC_GR_20190628_0d_1_010_6sc_fl.avg')) %>% 
+  mutate(variable = str_replace(string = variable, pattern = "^.*$", replacement =  c('Aqueous Mn', 'Birnessite', 'MnO2 Amend.', 'Sediment Mn'))) %>%
+  mutate(sample = str_replace(string = sample, pattern = "^.*$", replacement =  c('MnAC_3d'))) %>% select(-id) %>% drop_na()
+
+
+MnAC10d.XANES <- melt(XAS.XANES, id.vars = c('id','sample')) %>% filter(sample == 'MnAC_10days_XANES' & id == 20 & variable %in% c("MnSO4_soln.avg", 'NaBirn_500_K15.avg', 'Mn_MnO2_Carulite_400_003_3sc_fl.avg', 'SEDC_GR_20190628_0d_1_010_6sc_fl.avg')) %>% 
+  mutate(variable = str_replace(string = variable, pattern = "^.*$", replacement =  c('Aqueous Mn', 'Birnessite', 'MnO2 Amend.', 'Sediment Mn'))) %>%
+  mutate(sample = str_replace(string = sample, pattern = "^.*$", replacement =  c('MnAC_10d'))) %>% select(-id) %>% drop_na()
+
+
+MnAC20d.XANES <- melt(XAS.XANES, id.vars = c('id','sample')) %>% filter(sample == 'MnAC_20days_XANES' & id == 31 & variable %in% c("MnSO4_soln.avg", 'NaBirn_500_K15.avg', 'Mn_MnO2_Carulite_400_003_3sc_fl.avg', 'SEDC_GR_20190628_0d_1_010_6sc_fl.avg')) %>% 
+  mutate(variable = str_replace(string = variable, pattern = "^.*$", replacement =  c('Aqueous Mn', 'Birnessite', 'MnO2 Amend.', 'Sediment Mn'))) %>%
+  mutate(sample = str_replace(string = sample, pattern = "^.*$", replacement =  c('MnAC_20d'))) %>% select(-id) %>% drop_na()
+```
+
+
+```{r , warning=FALSE, message=FALSE}
+# Mn XANES Spectral Weight Plots
+Mn3d.XANES.plot <- ggplot(Mn3d.XANES, aes(fill=variable, y=value, x=sample)) + 
+    geom_bar(position="stack", stat="identity", aes(fill=variable)) + scale_fill_manual(values = colors) + ylab('Spectral Wt (%)')+theme_classic() + coord_cartesian(ylim = c(0, 1)) + theme(axis.title.x = element_blank()) + geom_text(aes(label = paste0(c(round(Mn3d.XANES$value, 2)*100),'%')), position = position_stack(vjust = 0.5))
+
+Mn10d.XANES.plot <- ggplot(Mn10d.XANES, aes(fill=variable, y=value, x=sample)) + 
+    geom_bar(position="stack", stat="identity", aes(fill=variable)) + scale_fill_manual(values = colors) + ylab('Spectral Wt (%)')+theme_classic() + coord_cartesian(ylim = c(0, 1)) + theme(axis.title.x = element_blank()) + geom_text(aes(label = paste0(c(round(Mn10d.XANES$value, 2)*100),'%')), position = position_stack(vjust = 0.5))
+
+Mn20d.XANES.plot <- ggplot(Mn20d.XANES, aes(fill=variable, y=value, x=sample)) + 
+    geom_bar(position="stack", stat="identity", aes(fill=variable)) + scale_fill_manual(values = colors) + ylab('Spectral Wt (%)')+theme_classic() + coord_cartesian(ylim = c(0, 1)) + theme(axis.title.x = element_blank(), legend.position = 'bottom') + geom_text(aes(label = paste0(c(round(Mn20d.XANES$value, 2)*100),'%')), position = position_stack(vjust = 0.5))
+
+
+```
+
+
+```{r}
+#MnAC XANES Spectral Weight Plots
+MnAC3d.XANES.plot <- ggplot(MnAC3d.XANES, aes(fill=variable, y=value, x=sample)) + 
+    geom_bar(position="stack", stat="identity", aes(fill=variable)) + scale_fill_manual(values = colors) + ylab('Spectral Wt (%)')+theme_classic() + coord_cartesian(ylim = c(0, 1)) + theme(axis.title.x = element_blank()) + geom_text(aes(label = paste0(c(round(MnAC3d.XANES$value, 2)*100),'%')), position = position_stack(vjust = 0.5))
+
+MnAC10d.XANES.plot <- ggplot(MnAC10d.XANES, aes(fill=variable, y=value, x=sample)) + 
+    geom_bar(position="stack", stat="identity", aes(fill=variable)) + scale_fill_manual(values = colors) + ylab('Spectral Wt (%)')+theme_classic() + coord_cartesian(ylim = c(0, 1)) + theme(axis.title.x = element_blank()) + geom_text(aes(label = paste0(c(round(MnAC10d.XANES$value, 2)*100),'%')), position = position_stack(vjust = 0.5))
+
+MnAC20d.XANES.plot <- ggplot(MnAC20d.XANES, aes(fill=variable, y=value, x=sample)) + 
+    geom_bar(position="stack", stat="identity", aes(fill=variable)) + scale_fill_manual(values = colors) + ylab('Spectral Wt (%)')+theme_classic() + coord_cartesian(ylim = c(0, 1)) + theme(axis.title.x = element_blank()) + geom_text(aes(label = paste0(c(round(MnAC20d.XANES$value, 2)*100),'%')), position = position_stack(vjust = 0.5))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+#Assemble Figures
+leg.XANES <- get_legend(Mn20d.XANES.plot)
+
+XANES.Mn.plots <- ggarrange(Mn3d.XANES.plot, Mn10d.XANES.plot, Mn20d.XANES.plot, nrow = 1, ncol = 3, legend = 'none')
+
+XANES.Mn <- annotate_figure(p = XANES.Mn.plots, top = 'Mn XANES Spectral Weights')
+
+XANES.MnAC.plots <- ggarrange(MnAC3d.XANES.plot, MnAC10d.XANES.plot, MnAC20d.XANES.plot, nrow = 1, ncol = 3, legend = 'none')
+
+XANES.MnAC <- annotate_figure(p = XANES.MnAC.plots, top = 'MnAC XANES Spectral Weights' )
+
+
+XANES.Mn/
+  EXAFS.Mn
+
+XANES.MnAC/
+  EXAFS.MnAC
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+#EXAFS tables
+MnAC3d.table.EXAFS <- MnAC3d %>% mutate(Region = 'EXAFS') %>% ggtexttable(rows = NULL, 
+                        theme = ttheme("mBlack"))
+
+MnAC10d.table.EXAFS <- MnAC10d %>% mutate(Region = 'EXAFS') %>% ggtexttable(rows = NULL, 
+                        theme = ttheme("mBlack"))
+
+MnAC20d.table.EXAFS <- MnAC20d %>% mutate(Region = 'EXAFS') %>% ggtexttable(rows = NULL, 
+                        theme = ttheme("mBlack"))
+
+Mn3d.table.EXAFS <- Mn3d %>% mutate(Region = 'EXAFS') %>% ggtexttable(rows = NULL, 
+                        theme = ttheme("mBlack"))
+
+Mn10d.table.EXAFS <- Mn10d %>% mutate(Region = 'EXAFS') %>% ggtexttable(rows = NULL, 
+                        theme = ttheme("mBlack"))
+
+Mn20d.table.EXAFS <- Mn20d %>% mutate(Region = 'EXAFS') %>% ggtexttable(rows = NULL, 
+                        theme = ttheme("mBlack"))
+```
+
+```{r , warning=FALSE, message=FALSE}
+#XANES tables
+MnAC3d.table.XANES <- MnAC3d.XANES %>% mutate(Region = 'XANES') %>% ggtexttable(rows = NULL, 
+                        theme = ttheme("mBlack"))
+
+MnAC10d.table.XANES <- MnAC10d.XANES %>% mutate(Region = 'XANES') %>% ggtexttable(rows = NULL, 
+                        theme = ttheme("mBlack"))
+
+MnAC20d.table.XANES <- MnAC20d.XANES %>% mutate(Region = 'XANES') %>% ggtexttable(rows = NULL, 
+                        theme = ttheme("mBlack"))
+
+Mn3d.table.XANES <- Mn3d.XANES %>% mutate(Region = 'XANES') %>% ggtexttable(rows = NULL, 
+                        theme = ttheme("mBlack"))
+
+Mn10d.table.XANES <- Mn10d.XANES %>% mutate(Region = 'XANES') %>% ggtexttable(rows = NULL, 
+                        theme = ttheme("mBlack"))
+
+Mn20d.table.XANES <- Mn20d.XANES %>% mutate(Region = 'XANES') %>% ggtexttable(rows = NULL, 
+                        theme = ttheme("mBlack"))
+```
+
+
+```{r , warning=FALSE, message=FALSE}
+#Individual plots and associated tables
+
+ggarrange(Mn3d.XANES.plot, Mn3d.plot, Mn3d.table.XANES, Mn3d.table.EXAFS, ncol = 2, nrow = 2, legend = 'top', common.legend = T)
+ggarrange(Mn10d.XANES.plot, Mn10d.plot, Mn10d.table.XANES, Mn10d.table.EXAFS, ncol = 2, nrow = 2, legend = 'top', common.legend = T)
+ggarrange( Mn20d.XANES.plot, Mn20d.plot, Mn20d.table.XANES, Mn3d.table.EXAFS, ncol = 2, nrow = 2, legend = 'top', common.legend = T)
+ggarrange( MnAC3d.XANES.plot, MnAC3d.plot, MnAC3d.table.XANES, MnAC3d.table.EXAFS, ncol = 2, nrow = 2, legend = 'top', common.legend = T)
+ggarrange(MnAC10d.XANES.plot, MnAC10d.plot, MnAC10d.table.XANES, MnAC10d.table.EXAFS, ncol = 2, nrow = 2, legend = 'top', common.legend = T)
+ggarrange(MnAC20d.XANES.plot, MnAC20d.plot, MnAC20d.table.XANES, MnAC20d.table.EXAFS, ncol = 2, nrow = 2, legend = 'top', common.legend = T)
+
+
+
+```

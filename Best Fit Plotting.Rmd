@@ -1,0 +1,39 @@
+---
+title: "Theoretical Mn Graphs"
+author: "Edwin Rivas Meraz"
+date: "5/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r setup, include=FALSE}
+load.packages <- function(x){if(class(x) != 'character') 
+  stop("Error: packages listed in vector are not characters!") #includes a sanity check 
+  lapply(x, require, character.only = TRUE)
+}
+
+packs <- c('readxl', 'reshape2', 'gridExtra', 'ggpubr', 'tidyverse', 'dplyr', 'LCF', 'kableExtra', 'patchwork')
+load.packages(packs)
+```
+
+```{r}
+
+July_2019_Fits
+```
+
+```{r}
+MnAC3d <- July_2019_Fits %>% filter(treatment == 'Mn AC', days == '3', region == 'XANES')
+
+ggplot(data=MnAC3d, aes(x=energy)) +
+  geom_line(aes(y = data), color = "steelblue") + 
+  geom_line(aes(y = fit), color="darkred") +
+  geom_line(aes(y = Birnessite), color="yellow") + 
+  geom_line(aes(y = `0 Day C`), color="green") +
+  geom_line(aes(y = Carulite), color="red") + 
+  geom_line(aes(y = MnSO4_soln.avg), color="green")
+```
+
